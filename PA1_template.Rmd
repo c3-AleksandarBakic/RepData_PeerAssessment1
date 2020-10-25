@@ -5,21 +5,123 @@ output:
     keep_md: true
 ---
 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+```
 
 ## Loading and preprocessing the data
 
-
+```{r load-and-preprocess}
+unzip("activity.zip")
+rawData <- read.csv("activity.csv")
+summary(rawData)
+```
 
 ## What is mean total number of steps taken per day?
 
-
+```{r mean-total-steps-per-day}
+totalStepsPerDay <- rawData %>% group_by(date) %>%
+  summarise(totalStepsPerDay=sum(steps, na.rm=TRUE), .groups="drop") %>%
+  pull(totalStepsPerDay)
+hist(totalStepsPerDay,
+     xlab="Total steps per day",
+     main="Frequency of total steps per day",
+     breaks=20)
+mean(totalStepsPerDay)
+median(totalStepsPerDay)
+```
 
 ## What is the average daily activity pattern?
 
+```{r average-daily-activity}
+dailyMeanSteps <- rawData %>% group_by(interval) %>%
+  summarise(dailyMean=mean(steps, na.rm=TRUE), .groups="drop")
+plot(
+  dailyMeanSteps,
+  type="l",
+  xlab="5-minute interval in HHMM format",
+  ylab="Average number of steps across all days")
+```
 
+The 5-minute interval with the maximum average number of steps across all
+the days in the dataset is 08:35-08:40 with 206 steps on average.
+
+```{r max-interval}
+dailyMeanSteps[which.max(dailyMeanSteps$dailyMean), ]
+```
 
 ## Imputing missing values
 
+As in the above summary, the number of NAs is:
+```{r count-of-missing-values}
+length(rawData[is.na(rawData$steps), 1])
+```
 
+I am going to replace the missing values by `mean` over the same hour. If there
+are no values at all to compute the mean, I will put 0 as the number of steps.
+
+```{r imputting-missing-values}
+data <- data.frame(rawData)
+data$datetime <- as.POSIXct( # add standard datetime column
+  paste(
+    data$date,
+    paste(
+      as.character(data$interval %/% 100),
+      as.character(data$interval %% 100),
+      sep=":")))
+data$hour <- format(data$datetime, "%Y-%m-%d %H") # add "mod hour" column
+data <- merge( # add meanSteps column (over the same hour)
+  data,
+  data %>% group_by(hour=format(datetime, "%Y-%m-%d %H")) %>%
+    summarise(meanSteps=mean(steps,na.rm=TRUE), .groups="drop"),
+  by="hour")
+# replace NA steps by meanSteps
+data[is.na(data$steps), "steps"] <- data[is.na(data$steps), "meanSteps"]
+# replace NaN steps (due to 0 non-NA steps within the same hour) by 0
+data[is.nan(data$steps), "steps"] <- 0
+data <- subset(data, select=-c(hour, meanSteps))
+summary(data)
+```
+
+### The mean total number of steps taken per day after imputting missing values
+
+```{r mean-total-steps-per-day-2}
+totalStepsPerDay2 <- data %>% group_by(date) %>%
+  summarise(totalStepsPerDay2=sum(steps), .groups="drop") %>%
+  pull(totalStepsPerDay2)
+hist(totalStepsPerDay2,
+     xlab="Total steps per day",
+     main="Frequency of total steps per day",
+     breaks=20)
+mean(totalStepsPerDay2)
+median(totalStepsPerDay2)
+```
+
+In the end, given the strategy of replacing the NAs by means, there is no
+significant impact on the total number of steps per day, their `mean` and
+`median`.
 
 ## Are there differences in activity patterns between weekdays and weekends?
+
+```{r weekdays, fig.width=8, fig.height=8}
+data$dayFactor <- factor(
+  weekdays(data$datetime, abbreviate=TRUE),
+  levels=c("Mon", "Tue", "Wed", "Thu", "Fri", "Sam", "Sun"),
+  labels=c("Weekday", "Weekday", "Weekday", "Weekday", "Weekday",
+           "Weekend", "Weekend"))
+par(mfrow=c(2, 1))
+par(mar=c(4, 4, 0, 0))
+plot(data %>% filter(dayFactor == "Weekday") %>%
+       group_by(interval) %>%
+       summarise(m=mean(steps), .groups="drop"),
+     type="l",
+     xlab="5-minute interval in HHMM format",
+     ylab="Weekday avg")
+plot(data %>% filter(dayFactor == "Weekend") %>%
+       group_by(interval) %>%
+       summarise(m=mean(steps), .groups="drop"),
+     type="l",
+     xlab="5-minute interval in HHMM format",
+     ylab="Weekend avg")
+```
